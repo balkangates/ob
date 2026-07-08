@@ -140,8 +140,8 @@ export default async function ApartmentPage({
               {apt.reviews.map((r) => (
                 <div key={r.id} className="rounded-lg border border-slate-200 p-4">
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-800">{r.authorName}</span>
-                    <span className="text-xs text-slate-400">{formatDate(r.createdAt)}</span>
+                    <span className="font-semibold text-slate-800">{r.author_name}</span>
+                    <span className="text-xs text-slate-400">{formatDate(r.created_at)}</span>
                   </div>
                   <StarRating value={r.rating} />
                   <p className="mt-1 text-sm text-slate-600">{r.comment}</p>
