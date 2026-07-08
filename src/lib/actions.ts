@@ -15,18 +15,19 @@ import { levelFromReservations, tierFor } from "@/lib/genius";
 
 export type FormState = { error?: string; ok?: boolean };
 
-function makeServerClient() {
-  const cookieStore = cookies();
+async function makeServerClient() {
+  // Next.js 16'da cookies() bir Promise döner — await edilmesi zorunlu.
+  const cookieStore = await cookies();
   return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll: () => (cookieStore as unknown as { getAll: () => { name: string; value: string }[] }).getAll(),
+        getAll: () => cookieStore.getAll(),
         setAll: (list) => {
           try {
             list.forEach(({ name, value, options }) =>
-              (cookieStore as unknown as { set: (n: string, v: string, o: unknown) => void }).set(name, value, options)
+              cookieStore.set(name, value, options)
             );
           } catch { /* Server component'ten çağrıldığında ignore */ }
         },
@@ -42,7 +43,7 @@ export async function loginAction(_prev: FormState, formData: FormData): Promise
   const password = String(formData.get("password") ?? "");
   if (!email || !password) return { error: "E-posta ve şifre gerekli." };
 
-  const sb = makeServerClient();
+  const sb = await makeServerClient();
   const { error } = await sb.auth.signInWithPassword({ email, password });
   if (error) return { error: "Geçersiz e-posta veya şifre." };
 
@@ -59,20 +60,67 @@ export async function registerAction(_prev: FormState, formData: FormData): Prom
   if (!email || !password || !full_name) return { error: "Ad, e-posta ve şifre zorunludur." };
   if (password.length < 6) return { error: "Şifre en az 6 karakter olmalı." };
 
-  const sb = makeServerClient();
-  const { error } = await sb.auth.signUp({
+  const sb = await makeServerClient();
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+  const { data, error } = await sb.auth.signUp({
     email, password,
-    options: { data: { full_name, phone } },
+    options: {
+      data: { full_name, phone },
+      emailRedirectTo: `${siteUrl}/auth/callback?next=/account`,
+    },
   });
   if (error) return { error: error.message };
+
+  // Supabase projesinde "Confirm email" açıksa signUp bir oturum döndürmez;
+  // kullanıcıyı e-postasını onaylaması için bilgilendirip login sayfasına yönlendiriyoruz.
+  if (!data.session) {
+    redirect("/login?registered=1");
+  }
 
   redirect("/account");
 }
 
 export async function logoutAction() {
-  const sb = makeServerClient();
+  const sb = await makeServerClient();
   await sb.auth.signOut();
   redirect("/");
+}
+
+// ------ ŞİFREMİ UNUTTUM / ŞİFRE SIFIRLAMA ------
+
+export async function forgotPasswordAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  if (!email) return { error: "E-posta gerekli." };
+
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+  const sb = await makeServerClient();
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
+  });
+  // Supabase, e-posta kayıtlı olmasa bile güvenlik nedeniyle hata döndürmeyebilir.
+  // Kullanıcı numaralandırmasını (enumeration) önlemek için her durumda aynı mesajı gösteriyoruz.
+  if (error) return { error: "İşlem şu anda gerçekleştirilemedi, lütfen tekrar deneyin." };
+
+  return { ok: true };
+}
+
+export async function resetPasswordAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const password = String(formData.get("password") ?? "");
+  const confirm  = String(formData.get("confirmPassword") ?? "");
+
+  if (password.length < 6) return { error: "Şifre en az 6 karakter olmalı." };
+  if (password !== confirm) return { error: "Şifreler eşleşmiyor." };
+
+  const sb = await makeServerClient();
+
+  // Kullanıcının geçerli bir "recovery" oturumu (reset linkinden gelen) olmalı
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { error: "Bağlantının süresi dolmuş veya geçersiz. Lütfen tekrar şifre sıfırlama isteği gönderin." };
+
+  const { error } = await sb.auth.updateUser({ password });
+  if (error) return { error: error.message };
+
+  redirect("/account");
 }
 
 // ------ REZERVASYON ------

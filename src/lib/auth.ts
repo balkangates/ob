@@ -18,20 +18,21 @@ export type SessionUser = {
   total_reservations: number;
 };
 
-function createSupabaseServerClient() {
-  const cookieStore = cookies();
+async function createSupabaseServerClient() {
+  // Next.js 16'da cookies() bir Promise döner — await edilmesi zorunlu.
+  const cookieStore = await cookies();
   return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
         getAll() {
-          return (cookieStore as unknown as { getAll: () => { name: string; value: string }[] }).getAll();
+          return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
-              (cookieStore as unknown as { set: (name: string, value: string, opts: unknown) => void }).set(name, value, options)
+              cookieStore.set(name, value, options)
             );
           } catch { /* Server component'ten çağrıldığında set çalışmaz, görmezden gel */ }
         },
@@ -42,7 +43,7 @@ function createSupabaseServerClient() {
 
 export async function getCurrentUser(): Promise<SessionUser | null> {
   try {
-    const sb = createSupabaseServerClient();
+    const sb = await createSupabaseServerClient();
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return null;
 
